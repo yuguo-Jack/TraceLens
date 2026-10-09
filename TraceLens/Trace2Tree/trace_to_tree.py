@@ -103,7 +103,7 @@ class BaseTraceToTree(ABC):
 
     def build_host_call_stack_tree(self, add_python_func=False):
         # 1. Filter and sort events based on their start timestamps.
-        #    - Include only CPU, CUDA runtime, and optionally Python function events.
+        #    - Include CPU, CUDA/HIP runtime, and optionally Python function events.
         # 2. Iterate through the sorted events and maintain a stack to track the current call hierarchy.
         #    - Pop events from the stack if they end before the current event starts to find the parent.
         #    - Set the parent of the current event as the top of the stack if the stack is not empty.
@@ -114,9 +114,9 @@ class BaseTraceToTree(ABC):
         def event_filter(event):
             cat = self.event_to_category(event)
             event["cat"] = cat
-            is_cpu_or_cuda_event = cat in {"cpu_op", "cuda_runtime", "cuda_driver"}
+            is_cpu_or_runtime_event = cat == "cpu_op" or cat in TraceEventUtils.RuntimeCategories
             is_python_event = cat == "python_function"
-            return is_cpu_or_cuda_event or (add_python_func and is_python_event)
+            return is_cpu_or_runtime_event or (add_python_func and is_python_event)
 
         print(f"Building CPU op tree with add_python_func={add_python_func}")
 
@@ -646,7 +646,7 @@ class JaxTraceToTree(BaseTraceToTree):
 
 
 class TraceToTree(BaseTraceToTree):
-    """Chrome-trace (PyTorch) tree with CUDA runtime / driver linking and host stack."""
+    """Chrome-trace (PyTorch) tree with CUDA/HIP runtime linking and host stack."""
 
     def __init__(
         self,
@@ -680,7 +680,7 @@ class TraceToTree(BaseTraceToTree):
             (
                 event
                 for event in self.events
-                if event.get("cat") in ["cuda_runtime", "cuda_driver"]
+                if event.get("cat") in TraceEventUtils.RuntimeCategories
                 and "launch" in event.get(Name, "").lower()
             ),
             None,
@@ -702,7 +702,7 @@ class TraceToTree(BaseTraceToTree):
         self.seq_num2event_uids_map = {}  # from seq id to list uids
         self.runtime_event_uids = (
             []
-        )  # UIDs of cuda_runtime/cuda_driver events for fast add_gpu_ops_to_tree
+        )  # UIDs of CUDA/HIP runtime events for fast add_gpu_ops_to_tree
         # Index: linking_key value -> list of GPU events (for _get_graph_gpu_events, avoids O(N) scan per graph launch)
         self.linking_id_to_gpu_events = defaultdict(list)
         # self.dict_pythonID2UID = {}  # Commented out: never read, only written
@@ -711,7 +711,7 @@ class TraceToTree(BaseTraceToTree):
         PID = TraceEventUtils.TraceKeys.PID
         TID = TraceEventUtils.TraceKeys.TID
         Args = TraceEventUtils.TraceKeys.Args
-        runtime_cats = {"cuda_runtime", "cuda_driver"}
+        runtime_cats = TraceEventUtils.RuntimeCategories
         gpu_cats = {"kernel", "gpu_memset", "gpu_memcpy"}
 
         for event in self.events:

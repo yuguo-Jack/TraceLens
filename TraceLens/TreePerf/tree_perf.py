@@ -1636,7 +1636,7 @@ class TreePerfAnalyzer:
                 if child_cat in {"kernel", "gpu_memcpy", "gpu_memset"}:
                     return True
                 # Continue traversing through runtime and python_function categories
-                if child_cat in {"cuda_runtime", "python_function"}:
+                if child_cat == "python_function" or child_cat in TraceEventUtils.RuntimeCategories:
                     if has_kernel_descendant(child, max_depth - 1):
                         return True
             return False

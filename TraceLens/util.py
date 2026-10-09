@@ -883,6 +883,12 @@ DEFAULT_CUSTOM_COLLECTIVE_REGEXES: List[re.Pattern] = [
 
 
 class TraceEventUtils:
+    # ROCm/HIP Kineto builds may preserve CUDA categories or emit HIP categories.
+    # Keep the original label: it is trace schema metadata, not a device vendor.
+    RuntimeCategories = frozenset(
+        {"cuda_runtime", "cuda_driver", "hip_runtime", "hip_driver"}
+    )
+
     class JaxOpKeys:
 
         # keywords for splitting jax events

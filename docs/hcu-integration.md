@@ -67,6 +67,17 @@ Baseline: `c5da90ee7d59e49bf75e8602f0211da1f6dcd8b3` from upstream `main`.
 | --- | --- | --- |
 | Portable CSV field bound | Native report CLI imports failed on a Windows Python build because `sys.maxsize` exceeded the C long accepted by `csv.field_size_limit`. Keep the existing large bound where supported and handle only `OverflowError`. | Native CLI help smoke tests plus large-field parsing under simulated platform limits; Linux/Windows CI. |
 | Fork CI isolation | Preserve the upstream private-repository sync workflow, but run its notification job only in the upstream repository. | Repository-identity condition; the HCU branch has its own CPU portability checks. |
+| HIP runtime categories | Recognize `hip_runtime` and `hip_driver` wherever host trees, launch correlation and GPU attachment recognize CUDA runtime events. Preserve original event labels, and retain CUDA-named events emitted by HIP Kineto builds. | Authored fixtures cover all four categories, HIP Graph one-to-many launches and rejection of ambiguous non-graph links; existing kernel-launcher, overlap and graph tests continue to pass. Real site traces remain a separate validation step. |
+
+The native `gpu_timeline` denominator spans the first GPU event start through the
+last GPU event end. It excludes CPU-only time before and after that span; it is
+not automatically the end-to-end training-step denominator. Use a retained,
+explicit step window for end-to-end hotspot coverage, and do not infer CPU or
+communication critical paths solely from overlapping intervals. Collective
+analysis may use inference stream-order matching when process-group metadata is
+absent; that fallback must not be treated as validated training rank-group
+evidence. Keep missing shapes, allocator events, backward annotations and rank
+clock alignment explicit in the consuming workflow.
 
 No HCU peak table, undocumented kernel rule or new hardware prediction is supplied
 by this initial fork. TrainFlow has run synthetic single-rank, compressed-trace
