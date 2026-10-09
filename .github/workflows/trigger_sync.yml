@@ -12,6 +12,7 @@ on:
 
 jobs:
   notify:
+    if: github.repository == 'AMD-AGI/TraceLens'
     runs-on: ubuntu-latest
     steps:
       - name: Trigger sync in private repo

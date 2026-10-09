@@ -41,7 +41,11 @@ from TraceLens.Agent.Analysis.category_analyses.analysis_utils import (
 
 # Real traces have CSV cells far larger than csv's 131072-char default, which
 # would crash the trace-quality gate; lift the limit to the platform maximum.
-csv.field_size_limit(sys.maxsize)
+try:
+    csv.field_size_limit(sys.maxsize)
+except OverflowError:
+    # Some Windows Python builds accept only a signed 32-bit C long here.
+    csv.field_size_limit(2**31 - 1)
 
 # Constants
 

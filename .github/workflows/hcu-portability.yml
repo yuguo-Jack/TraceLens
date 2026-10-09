@@ -1,0 +1,31 @@
+name: HCU fork portability
+on:
+  push:
+    branches: [hcu]
+  pull_request:
+    branches: [hcu]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  base-install:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.10', '3.12']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          filter: blob:none
+          sparse-checkout: |
+            TraceLens
+            tests/platform
+            tests/fixtures
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest -q tests/platform/test_portability.py tests/test_analysis_agent_deterministic.py
+      - run: python -m pytest -q tests/test_reporting_gpu_arch.py -k test_resolve
+      - run: python -m black --check TraceLens/Agent/Analysis/utils/deterministic_fallback.py tests/platform/test_portability.py

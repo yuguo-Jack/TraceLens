@@ -6,6 +6,10 @@ See LICENSE for license information.
 
 # TraceLens
 
+> **HCU integration fork:** the `hcu` branch preserves upstream functionality and
+> carries focused compatibility changes for HCU workflows. See
+> [integration scope, capability requirements and validation status](docs/hcu-integration.md).
+
 [![Tests](https://github.com/AMD-AGI/TraceLens/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/AMD-AGI/TraceLens/actions/workflows/unit-tests.yml)
 [![Lint](https://github.com/AMD-AGI/TraceLens/actions/workflows/lint.yml/badge.svg)](https://github.com/AMD-AGI/TraceLens/actions/workflows/lint.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
