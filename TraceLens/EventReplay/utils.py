@@ -54,6 +54,32 @@ class TensorCfg:
 def build_tensor(cfg: TensorCfg, device: str = "cuda") -> "torch.Tensor":
 
     torch = _get_torch_or_raise()
+    dtype = profile_dtype(cfg.dtype)
+    size = cfg.shape
+    stride = cfg.strides
+    # Fill backing storage, then construct the view. This also supports
+    # expanded (zero-stride) read-only inputs without overlapping writes.
+    span = 0 if 0 in size else 1 + sum((d - 1) * s for d, s in zip(size, stride))
+    storage = torch.empty(span, dtype=dtype, device=device)
+    t = storage.as_strided(size, stride)
+    is_floating = t.is_floating_point() or t.is_complex()
+    init = cfg.init
+    if init == "normal":
+        if not is_floating:
+            raise ValueError(
+                f"Cannot initialize tensor of type {cfg.dtype} with 'normal' init."
+            )
+        storage.normal_()
+    elif init == "zeros":
+        storage.zero_()
+    elif init is not None:
+        raise ValueError(f"Unsupported tensor initialization: {init}")
+    return t
+
+
+def profile_dtype(name):
+    """Resolve only profiler dtypes explicitly supported by replay."""
+    torch = _get_torch_or_raise()
     dict_profile2torchdtype = {
         "bool": torch.bool,
         "int": torch.int,
@@ -63,22 +89,7 @@ def build_tensor(cfg: TensorCfg, device: str = "cuda") -> "torch.Tensor":
         "c10::Half": torch.float16,
         "c10::BFloat16": torch.bfloat16,
     }
-    dtype = dict_profile2torchdtype[cfg.dtype]
-    size = cfg.shape
-    stride = cfg.strides
-    # allocate *exactly* the storage needed for that stride/shape
-    t = torch.empty_strided(size, stride, dtype=dtype, device=device)
-    is_floating = t.is_floating_point() or t.is_complex()
-    init = cfg.init
-    if init == "normal":
-        if not is_floating:
-            raise ValueError(
-                f"Cannot initialize tensor of type {cfg.dtype} with 'normal' init."
-            )
-        t.normal_()  # or whatever init you like
-    elif init is not None:
-        raise ValueError(f"Unsupported tensor initialization: {init}")
-    return t
+    return dict_profile2torchdtype[name]
 
 
 def summarize_tensor(tensor: "torch.Tensor") -> str:
@@ -91,7 +102,7 @@ def summarize_tensor(tensor: "torch.Tensor") -> str:
     Returns:
         str: The summary string.
     """
-    return f"Tensor(shape={tensor.shape}, dtype={tensor.dtype}, device={tensor.device}, strides={tensor.stride()})"
+    return f"Tensor(shape={tuple(tensor.shape)}, dtype={tensor.dtype}, device={tensor.device}, strides={tensor.stride()})"
 
 
 def benchmark_func(func, device, warmup=50, avg_steps=100):

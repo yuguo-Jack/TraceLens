@@ -79,10 +79,31 @@ absent; that fallback must not be treated as validated training rank-group
 evidence. Keep missing shapes, allocator events, backward annotations and rank
 clock alignment explicit in the consuming workflow.
 
-No HCU peak table, undocumented kernel rule or new hardware prediction is supplied
-by this initial fork. TrainFlow has run synthetic single-rank, compressed-trace
-and two-rank collective reports locally. Real HCU DTK/PyTorch versions, graph
-traces, custom collectives, predictions and training loss remain to be validated.
+The HCU paths require explicit device identity and provenance rather than a
+bundled universal peak table. Real gfx936/BW1000_H qualification used DTK 26.10,
+PyTorch 2.11.0 and HIP 7.2.26365: forward/backward Graph capture and replay,
+captured-value matrix-multiply replay, measured FP32/BF16/copy envelopes,
+native category analysis, and hipprof JSON/pftrace report equivalence. The same
+environment executed XProf 3.16.0 counter and SQTT capture and XCompute Light
+4.8.0 CSV export. This is bounded tool qualification, not complete training loss
+validation, support for all devices, or a promise of predicted speedup.
+
+Additional HCU interfaces (upstream console commands remain intact):
+
+| Module | Contract |
+| --- | --- |
+| `TraceLens.PerfModel.hcu_roofline` | Qualified shape/dtype workload mappings; measured envelope versus separately supplied theoretical ceilings; unknown work remains unknown; no automatic E2E savings. |
+| `TraceLens.Trace2Tree.training_graph` | SHA-bound explicit capture/replay manifest; serialized single-stream attribution, including autograd worker operations; preserve actual replay GPU intervals exactly once. |
+| `TraceLens.EventReplay.hcu_replay` | Source event/schema/value hashes, captured-output verification, bounded isolated functional calls; reject unsupported stateful semantics. |
+| `TraceLens.Agent.Analysis.utils.hcu_analysis` | Native category metrics and aggregation; actual Agent findings/report remain a separate evidence and review step. |
+| `TraceLens.Reporting.hipprof` | DTK JSON and converted pftrace, exact nanosecond fields and process-scoped correlations; copy/memset separated; derived conversion cache preserves original inputs. |
+| `TraceLens.Reporting.xcompute` | Preserve counter/SQTT CSV semantics, missing values and units; bind dispatches within one source perf capture, not globally by kernel name. |
+
+See [Graph and replay](how-to/hcu-graph-replay.md),
+[Roofline and Agent](how-to/hcu-roofline-agent.md), and
+[XProf/XCompute](how-to/hcu-xprof-xcompute.md) for reproducible commands and
+the precise rejection/qualification boundaries. General rocprofv3 input support
+does not itself establish DTK hipprof or XProf compatibility.
 
 For each real environment, retain the software/source versions, capture settings,
 known op-to-kernel workload, parallel groups, clock alignment, steady-state

@@ -10,6 +10,35 @@ This document is the detailed specification for the TraceLens **analysis-orchest
 
 ## Workflow overview
 
+### HCU architecture and evidence contract
+
+For HCU, use the site's explicit architecture file and follow
+[HCU roofline and Agent qualification](../../../../../docs/how-to/hcu-roofline-agent.md).
+Pass `--gpu-arch-json <site-file>` to native preparation with the actual device
+name as `--platform`. Reuse inputs and authorization already supplied by the
+user or coordinator. Do not select an AMD preset for an absent HCU platform.
+
+The HCU contract distinguishes a measured envelope from an optional vendor
+ceiling and requires qualified workload mappings. Measured efficiency and
+conditional headroom are screening diagnostics. Unknown work stays unknown;
+neither that ratio nor an ideal lower bound establishes achievable E2E speedup.
+Use actual timeline spans and overlap when assessing E2E impact. Qualify observed
+categories and Agent scopes from the trace rather than imposing a roster.
+
+`python -m TraceLens.Agent.Analysis.utils.hcu_analysis run --output-dir <output_dir>`
+executes deterministic categories and aggregate checks only. An invoking Agent
+must still reason over the artifacts, write findings/report, and validate them.
+The command records incomplete findings and an absent report explicitly.
+
+After accepting the authored findings and report for the current HCU inputs,
+run `python -m TraceLens.Agent.Analysis.utils.hcu_analysis review --output-dir <output_dir> --include-report`,
+then `aggregate`. The explicit review binds current sources, executed metrics
+and authored reasoning. It does not invoke an Agent. Never use it automatically
+to relabel old findings as reviewed. Reprepare and reanalyze after source
+changes; same-path trace and site-file overwrites invalidate earlier receipts.
+Comparative analysis also binds both trace CSV directories and the comparison
+utilization metadata; changing either side requires current native metrics and review.
+
 The orchestrator runs a staged pipeline (Steps 0–12): collect inputs and environment prefix, generate perf reports, prepare category data via `orchestrator_prepare.py`, run system-level and compute-kernel subagents in parallel, aggregate and validate findings, identify the model, render plots when no extension is present, and write `analysis.md` via remote `tee` heredocs. Only Steps 7, 8, and 10 delegate to Task subagents; all other steps run in the main agent.
 
 ---

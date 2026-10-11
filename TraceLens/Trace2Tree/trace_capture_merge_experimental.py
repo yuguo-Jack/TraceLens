@@ -471,7 +471,7 @@ def _get_cached_capture_tree(key, filepath):
         capture_events, capture_filtered_events = get_subtree_events(
             capture_tree,
             c_root,
-            cat_filter=["cuda_runtime", "cuda_driver"],
+            cat_filter=TraceLens.util.TraceEventUtils.RuntimeCategories,
             name_filter=["Launch", "Memcpy", "Memset"],
         )
         filtered_uids = {e[UID] for e in capture_filtered_events}
@@ -492,14 +492,14 @@ def find_capture_roots(capture_tree):
         event
         for event in capture_tree.events
         if "StreamBeginCapture" in event.get("name", "")
-        and event.get("cat", "") == "cuda_runtime"
+        and event.get("cat", "") in TraceLens.util.TraceEventUtils.RuntimeCategories
     ]
     capture_begin_ts = [event["ts"] + event["dur"] for event in capture_begin]
     capture_end = [
         event
         for event in capture_tree.events
         if "StreamEndCapture" in event.get("name", "")
-        and event.get("cat", "") == "cuda_runtime"
+        and event.get("cat", "") in TraceLens.util.TraceEventUtils.RuntimeCategories
     ]
     capture_end_ts = [event["ts"] for event in capture_end]
     for ts, te in zip(capture_begin_ts, capture_end_ts):
@@ -540,6 +540,11 @@ def find_execution_roots(graph_tree):
     Primary (detailed) patterns are tried first, and native (backup) patterns are used only when no primary root is found.
     """
     from ..TraceUtils.utils.annotation_utils import find_known_annotations
+    from .training_graph import training_annotations
+
+    training = [event for event, _ in training_annotations(graph_tree.events)]
+    if training:
+        return training
 
     return find_known_annotations(graph_tree.events)
 
@@ -683,6 +688,16 @@ def merge_capture_trace_into_graph(
         Augmented graph_tree with capture information merged in, or ``None``
         if the merge failed.
     """
+    # Training graphs use exact explicit contracts. Keep the upstream inference
+    # metadata-list behavior available to existing callers.
+    with open(metadata_json_path, encoding="utf-8") as handle:
+        metadata = json.load(handle)
+    if isinstance(metadata, dict):
+        from .training_graph import merge_training_capture_trace
+
+        return merge_training_capture_trace(
+            capture_folder, metadata_json_path, graph_tree_filepath
+        )
     if graph_tree is None:
         graph_tree = _load_trace_tree_from_file(
             graph_tree_filepath, add_python_func=True
@@ -692,6 +707,15 @@ def merge_capture_trace_into_graph(
     print("Loaded graph tree with {} events".format(len(graph_tree.events)))
 
     execution_graph_root_map = build_execution_graph_root_map(graph_tree)
+    if any(
+        root["name"].startswith("tracelens.train_graph.")
+        for root, _ in execution_graph_root_map
+    ):
+        from .training_graph import TrainingGraphContractError
+
+        raise TrainingGraphContractError(
+            "Training graph annotations require a tracelens.training_graph.v1 manifest"
+        )
 
     capture_map, capture_batch_sizes = load_capture_folder(
         capture_folder, metadata_json_path

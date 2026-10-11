@@ -28,4 +28,20 @@ jobs:
       - run: python -m pip install -e ".[dev]"
       - run: python -m pytest -q tests/platform/test_portability.py tests/test_analysis_agent_deterministic.py
       - run: python -m pytest -q tests/test_reporting_gpu_arch.py -k test_resolve
+      - run: python -m pytest -q tests/test_hcu_graph_replay.py tests/test_hcu_roofline.py tests/test_hcu_agent.py tests/test_hcu_hipprof.py tests/test_hcu_xcompute.py tests/test_pftrace_utils.py tests/test_hip_runtime_categories.py
       - run: python -m black --check TraceLens/Agent/Analysis/utils/deterministic_fallback.py tests/platform/test_portability.py
+  replay-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          filter: blob:none
+          sparse-checkout: |
+            TraceLens
+            tests/fixtures
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: python -m pytest -q tests/test_hcu_event_replay.py tests/test_event_replay.py tests/test_event_replay_module.py -m "not gpu"

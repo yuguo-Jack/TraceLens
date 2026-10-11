@@ -130,6 +130,34 @@ def _category_findings_empty(filepath):
     return isinstance(cf, list) and len(cf) == 0
 
 
+def _system_findings_empty(filepath):
+    """Allow reviewed negative results when the native analyzer found no issue.
+
+    Missing/failed metrics cannot authorize empty findings. This prevents agents
+    from inventing recommendations solely to satisfy a structural validator.
+    """
+    try:
+        with open(_metrics_json_for_findings(filepath), encoding="utf-8") as stream:
+            metrics = json.load(stream)
+    except (OSError, ValueError):
+        return False
+    if metrics.get("status") == "NO_DATA":
+        return True
+    if metrics.get("status") not in ("OK", "SUCCESS"):
+        return False
+    if "idle_flagged" in metrics:
+        return metrics["idle_flagged"] is False
+    assessments = (
+        "memcpy_assessment",
+        "nccl_blocking_assessment",
+        "overlap_assessment",
+    )
+    return metrics.get("patterns_detected") == [] and all(
+        isinstance(metrics.get(key), dict) and metrics[key].get("flagged") is False
+        for key in assessments
+    )
+
+
 def validate_findings_file(filepath, tier, comparison_scope=None):
     """Validate a single findings file against the sub-agent spec contract.
 
@@ -175,7 +203,9 @@ def validate_findings_file(filepath, tier, comparison_scope=None):
     rec_start = content.find("## Recommendations")
     da_start = content.find("## Detailed Analysis")
 
-    relaxed_empty = tier == "compute" and _category_findings_empty(filepath)
+    relaxed_empty = (tier == "compute" and _category_findings_empty(filepath)) or (
+        tier in ("system", "fusion") and _system_findings_empty(filepath)
+    )
 
     p_items = []
     if rec_start >= 0:
@@ -469,6 +499,25 @@ def validate_subagent_outputs(output_dir):
 def _check_time_sanity(manifest):
     """Verify category GPU kernel time sum approximates computation time."""
     categories = manifest.get("categories", [])
+    if "hcu_roofline" in manifest:
+        unknown = [
+            cat["name"]
+            for cat in categories
+            if cat.get("tier") == "compute_kernel"
+            and cat.get("gpu_kernel_time_ms") is None
+        ]
+        gpu_util = manifest.get("gpu_utilization", {})
+        if unknown or any(
+            gpu_util.get(key) is None
+            for key in ("total_time_ms", "computation_time_percent")
+        ):
+            return {
+                "status": "WARN",
+                "messages": [
+                    "Time comparison unavailable: missing category or GPU timeline measurements"
+                    + (" (" + ", ".join(unknown) + ")" if unknown else "")
+                ],
+            }
     total_category_time = sum(
         cat.get("gpu_kernel_time_ms", 0)
         for cat in categories
@@ -705,12 +754,33 @@ def _validate_report_comparison_scope_diffs(content, output_dir, comparison_scop
     kf_next = content.find("\n## ", kf_start + 1)
     kf_section = content[kf_start:kf_next] if kf_next > 0 else content[kf_start:]
 
+    hcu_unqualified = False
+    try:
+        with open(
+            os.path.join(output_dir, "category_data", "kernel_fusion_metrics.json"),
+            encoding="utf-8",
+        ) as stream:
+            fusion_metrics = json.load(stream)
+        hcu_unqualified = (
+            "hcu_roofline" in load_manifest(output_dir)
+            and fusion_metrics.get("status") == "UNQUALIFIED"
+            and fusion_metrics.get("reference_kind") == "measured_envelope"
+        )
+    except (OSError, ValueError):
+        pass
+
     errors = []
     for line_offset, line in enumerate(kf_section.splitlines()):
         if not line.strip().startswith("**Impact**"):
             continue
         impact_text = line.split("**Impact**")[-1].strip().lstrip(":").strip()
         if not impact_text:
+            continue
+        if hcu_unqualified:
+            if not _NOT_QUANTIFIABLE_SENTINEL.search(impact_text):
+                errors.append(
+                    "Unqualified HCU fusion impact must remain not quantifiable from trace data"
+                )
             continue
         if comparison_scope == "standalone":
             if not _KF_IMPACT_STANDALONE_RE.search(impact_text):
@@ -1053,7 +1123,11 @@ class MarkerValidator:
         if file_class == "category_findings" and rel not in cls.COMPUTE_NO_P_ITEM:
             if not skip_p_item_required and "p_item" not in seen_kinds:
                 errors.append(f"{rel}: missing required kind=p_item")
-        if file_class == "system_findings" and "p_item" not in seen_kinds:
+        if (
+            file_class == "system_findings"
+            and not skip_p_item_required
+            and "p_item" not in seen_kinds
+        ):
             errors.append(f"{rel}: missing required kind=p_item")
         n_headings = len(_P_ITEM_RE.findall(text))
         n_markers = sum(

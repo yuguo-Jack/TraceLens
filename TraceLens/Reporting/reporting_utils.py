@@ -43,11 +43,13 @@ def resolve_gpu_arch(
             "At most one of gpu_arch_json_path, gpu_arch_platform, and gpu_arch "
             "may be set."
         )
+    from TraceLens.PerfModel.hcu_roofline import qualify_hcu_arch
+
     if gpu_arch is not None:
-        return gpu_arch
+        return qualify_hcu_arch(gpu_arch)
     if gpu_arch_json_path is not None:
-        with open(gpu_arch_json_path, "r") as f:
-            return json.load(f)
+        with open(gpu_arch_json_path, "r", encoding="utf-8") as f:
+            return qualify_hcu_arch(json.load(f))
     if gpu_arch_platform is not None:
         from TraceLens.Agent.Analysis.utils.arch_utils import load_arch
 

@@ -15,6 +15,7 @@ Outputs cpu_idle_metrics.json with analysis results.
 """
 
 import argparse
+import json
 import os
 import sys
 import pandas as pd
@@ -51,7 +52,9 @@ def load_ops_summary(output_dir: str) -> Optional[pd.DataFrame]:
     return pd.read_csv(csv_path)
 
 
-def analyze_kernel_patterns(ops_df: Optional[pd.DataFrame]) -> Dict[str, Any]:
+def analyze_kernel_patterns(
+    ops_df: Optional[pd.DataFrame], hcu=False
+) -> Dict[str, Any]:
     """Analyze kernel patterns to identify overhead sources."""
     patterns = {
         "short_kernel_count": 0,
@@ -60,12 +63,32 @@ def analyze_kernel_patterns(ops_df: Optional[pd.DataFrame]) -> Dict[str, Any]:
         "kernel_count_by_category": {},
     }
 
+    count_column = "Kernel Invocation Count" if hcu else "Count"
+    if hcu and (
+        ops_df is None
+        or "Kernel Time (µs)_sum" not in ops_df
+        or count_column not in ops_df
+    ):
+        # Native ops_summary Count counts CPU operations, not GPU launches.
+        # Its direct/subtree time columns do not provide kernel distributions.
+        return {
+            "availability": "unavailable",
+            "short_kernel_count": None,
+            "total_kernel_count": None,
+            "avg_kernel_time_us": None,
+            "kernel_count_by_category": None,
+            "missing_fields": [
+                "kernel_duration_distribution",
+                "verified_kernel_invocation_count",
+            ],
+        }
+
     if ops_df is None or ops_df.empty:
         return patterns
 
     # Count kernels and analyze times
-    if "Kernel Time (µs)_sum" in ops_df.columns and "Count" in ops_df.columns:
-        patterns["total_kernel_count"] = int(ops_df["Count"].sum())
+    if "Kernel Time (µs)_sum" in ops_df.columns and count_column in ops_df.columns:
+        patterns["total_kernel_count"] = int(ops_df[count_column].sum())
 
         total_time = ops_df["Kernel Time (µs)_sum"].sum()
         if patterns["total_kernel_count"] > 0:
@@ -75,12 +98,12 @@ def analyze_kernel_patterns(ops_df: Optional[pd.DataFrame]) -> Dict[str, Any]:
         if "Kernel Time (µs)_mean" in ops_df.columns:
             short_ops = ops_df[ops_df["Kernel Time (µs)_mean"] < 10]
             patterns["short_kernel_count"] = (
-                int(short_ops["Count"].sum()) if not short_ops.empty else 0
+                int(short_ops[count_column].sum()) if not short_ops.empty else 0
             )
 
     # Analyze by category
-    if "op category" in ops_df.columns and "Count" in ops_df.columns:
-        category_counts = ops_df.groupby("op category")["Count"].sum().to_dict()
+    if "op category" in ops_df.columns and count_column in ops_df.columns:
+        category_counts = ops_df.groupby("op category")[count_column].sum().to_dict()
         patterns["kernel_count_by_category"] = {
             k: int(v) for k, v in category_counts.items()
         }
@@ -122,11 +145,21 @@ def main():
         print(f"  Idle: {idle_percent:.2f}%")
 
         # Analyze kernel patterns
-        kernel_patterns = analyze_kernel_patterns(ops_df)
+        metadata_path = os.path.join(output_dir, "metadata", "cpu_idle_metadata.json")
+        is_hcu = False
+        if os.path.isfile(metadata_path):
+            with open(metadata_path, encoding="utf-8") as stream:
+                is_hcu = "hcu_arch" in json.load(stream)
+        kernel_patterns = analyze_kernel_patterns(ops_df, hcu=is_hcu)
         print(f"\nKernel Analysis:")
-        print(f"  Total Kernels: {kernel_patterns['total_kernel_count']}")
-        print(f"  Short Kernels (<10µs): {kernel_patterns['short_kernel_count']}")
-        print(f"  Avg Kernel Time: {kernel_patterns['avg_kernel_time_us']:.1f} µs")
+        if kernel_patterns.get("availability") == "unavailable":
+            print(
+                "  Kernel pattern counters unavailable from this operation summary schema"
+            )
+        else:
+            print(f"  Total Kernels: {kernel_patterns['total_kernel_count']}")
+            print(f"  Short Kernels (<10µs): {kernel_patterns['short_kernel_count']}")
+            print(f"  Avg Kernel Time: {kernel_patterns['avg_kernel_time_us']:.1f} µs")
 
         idle_flagged = idle_percent > 15
         print(f"\n  Idle Flagged: {idle_flagged} ({idle_percent:.1f}%)")

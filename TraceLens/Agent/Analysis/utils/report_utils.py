@@ -326,6 +326,8 @@ def generate_priority_data(output_dir: str, max_recommendations: int = 6) -> str
             if cat_name in quantified_cats or cat_name in heuristic_cats:
                 continue
             gpu_time = cat_entry.get("gpu_kernel_time_ms", 0)
+            if gpu_time is None:
+                continue  # Unavailable HCU time cannot be ranked as observed zero.
             if gpu_time >= threshold_ms:
                 unmodeled.append(
                     {

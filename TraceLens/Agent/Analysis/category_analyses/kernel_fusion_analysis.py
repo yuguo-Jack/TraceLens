@@ -694,6 +694,61 @@ def main():
         print(f"No fusion candidates found. Metrics written to: {output_path}")
         return
 
+    if manifest.get("hcu_roofline") is not None:
+        # Preserve useful launch/traffic opportunities. A measured envelope
+        # alone does not validate dependencies, fused work or E2E savings.
+        opportunities = []
+        for candidate in candidates:
+            kernels = candidate.get("kernels", candidate.get("kernels_trace1", []))
+            instances = candidate.get("instance_count", 1)
+            opportunities.append(
+                {
+                    "operation": candidate.get(
+                        "base_name", candidate.get("module_name", "Unknown")
+                    ),
+                    "instance_count": instances,
+                    "kernel_count": len(kernels),
+                    "potential_removed_launches": max(0, len(kernels) - 1) * instances,
+                    "launch_count_reduction_feasibility_proven": False,
+                    "contains_only_matrix_ops": all(
+                        _is_matrix_op(kernel) for kernel in kernels
+                    ),
+                    "observed_kernel_time_sum_us": candidate.get(
+                        "total_kernel_time_us",
+                        candidate.get("total_kernel_time_us_trace1"),
+                    ),
+                    "modeled_data_in_out_mb": [
+                        {
+                            "name": kernel.get("name"),
+                            "data_in_mb": kernel.get("data_in_mb"),
+                            "data_out_mb": kernel.get("data_out_mb"),
+                        }
+                        for kernel in kernels
+                    ],
+                    "intermediate_traffic_savings_bytes": None,
+                    "launch_time_savings_us": None,
+                    "achievable_e2e_savings_pct": None,
+                    "status": "candidate_requires_dependency_and_fused_workload_validation",
+                }
+            )
+        metrics = {
+            "category": "kernel_fusion",
+            "status": "UNQUALIFIED",
+            "candidate_count": len(candidates),
+            "candidates": candidates,
+            "fusion_opportunities": opportunities,
+            "reference_kind": "measured_envelope",
+            "impact_estimates": [],
+            "high_confidence_kernel_map": {},
+            "achievable_e2e_savings_pct": None,
+            "warning": "Fusion requires dependency, intermediate-traffic and workload validation; measured envelopes do not establish E2E savings.",
+        }
+        output_path = write_metrics_json(metrics, args.output_dir, "kernel_fusion")
+        print(
+            f"HCU fusion opportunities retained without qualified savings: {output_path}"
+        )
+        return
+
     platform = manifest.get("platform", "MI300X")
     try:
         arch = load_arch_config(args.output_dir, platform)

@@ -7,6 +7,7 @@
 """Unit tests for TraceLens.Reporting.pftrace_utils."""
 
 import json
+import sys
 from pathlib import Path
 from unittest import mock
 
@@ -20,12 +21,12 @@ from TraceLens.Reporting.pftrace_utils import (
 
 
 def test_run_success():
-    run(["python3", "-c", "print('ok')"])
+    run([sys.executable, "-c", "print('ok')"])
 
 
 def test_run_failure_raises():
     with pytest.raises(RuntimeError, match="Command failed"):
-        run(["python3", "-c", "import sys; sys.exit(1)"])
+        run([sys.executable, "-c", "import sys; sys.exit(1)"])
 
 
 def test_ensure_trace_json_returns_json_path(tmp_path):
@@ -66,17 +67,18 @@ def test_ensure_trace_json_pftrace_converts(tmp_path):
     pftrace = tmp_path / "capture.pftrace"
     pftrace.write_bytes(b"PFTRACE")
     fake_traceconv = tmp_path / "traceconv"
-    fake_traceconv.write_text("#!/bin/sh\n")
+    fake_traceconv.write_text("#!/usr/bin/env python3\n")
     fake_traceconv.chmod(0o755)
 
     def fake_run(cmd, cwd=None):
-        out_json = Path(cmd[3])
+        out_json = Path(cmd[-1])
         out_json.write_text(json.dumps({"traceEvents": []}))
 
     with mock.patch("TraceLens.Reporting.pftrace_utils.run", side_effect=fake_run):
         result = ensure_trace_json(str(pftrace), traceconv_path=str(fake_traceconv))
 
-    assert result == str(pftrace.with_suffix(".json"))
+    assert Path(result).parent == tmp_path / ".tracelens-cache"
+    assert not pftrace.with_suffix(".json").exists()
     assert Path(result).exists()
 
 
@@ -85,3 +87,47 @@ def test_ensure_trace_json_missing_traceconv_raises(tmp_path):
     pftrace.write_bytes(b"PFTRACE")
     with pytest.raises(FileNotFoundError, match="traceconv not found"):
         ensure_trace_json(str(pftrace), traceconv_path=str(tmp_path / "missing"))
+
+
+def test_conversion_preserves_existing_sibling_json_and_handles_gzip(tmp_path):
+    import gzip
+
+    pftrace = tmp_path / "capture.pftrace.gz"
+    with gzip.open(pftrace, "wb") as stream:
+        stream.write(b"PFTRACE")
+    original = tmp_path / "capture.json"
+    original.write_text("immutable source")
+    converter = tmp_path / "traceconv.exe"
+    converter.write_bytes(b"EXE")
+
+    def fake_run(argv, **kwargs):
+        assert Path(argv[-2]).read_bytes() == b"PFTRACE"
+        Path(argv[-1]).write_text('{"traceEvents": []}')
+
+    with mock.patch("TraceLens.Reporting.pftrace_utils.run", fake_run):
+        result = ensure_trace_json(
+            str(pftrace), str(converter), str(tmp_path / "derived")
+        )
+    assert original.read_text() == "immutable source"
+    assert Path(result).parent == tmp_path / "derived"
+    assert json.loads(Path(result).read_text()) == {"traceEvents": []}
+
+
+def test_shell_converter_is_not_forced_through_python(tmp_path):
+    import os
+
+    pftrace = tmp_path / "source.pftrace"
+    pftrace.write_bytes(b"PFTRACE")
+    converter = tmp_path / "traceconv"
+    converter.write_text('#!/bin/sh\nexec some-converter "$@"\n')
+
+    def fake_run(argv, **kwargs):
+        assert argv[0] == str(converter)
+        Path(argv[-1]).write_text("{}")
+
+    with mock.patch("TraceLens.Reporting.pftrace_utils.run", fake_run):
+        if os.name == "nt":
+            with pytest.raises(ValueError, match="Non-Python"):
+                ensure_trace_json(str(pftrace), str(converter))
+        else:
+            ensure_trace_json(str(pftrace), str(converter))

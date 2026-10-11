@@ -79,9 +79,9 @@ def perf_report_sanity_check(
     print(f"\n{'='*60}")
     print("Perf Report Sanity Check")
     print(f"{'='*60}")
-    print(f"  {use_time} (gpu_timeline):     {computation_time_us:.2f} µs")
-    print(f"  Kernel time (kernel_launchers):       {kl_total_us:.2f} µs")
-    print(f"  Kernel time (unified_perf):           {up_total_us:.2f} µs")
+    print(f"  {use_time} (gpu_timeline):     {computation_time_us:.2f} us")
+    print(f"  Kernel time (kernel_launchers):       {kl_total_us:.2f} us")
+    print(f"  Kernel time (unified_perf):           {up_total_us:.2f} us")
 
     kl_pass = kl_total_us >= computation_time_us
     up_pass = up_total_us >= computation_time_us
@@ -235,7 +235,7 @@ def classify_graph_capture_trace(input_folder: str):
             1
             for e in events
             if "StreamBeginCapture" in e.get("name", "")
-            and e.get("cat") == "cuda_runtime"
+            and e.get("cat") in TraceEventUtils.RuntimeCategories
         )
 
     def infer_mode_from_captures(num_captures: int):
@@ -543,6 +543,7 @@ def generate_perf_report_pytorch(
     group_by_parent_module: bool = False,
     group_by_num_kernels: bool = False,
     include_call_stack: bool = False,
+    write_outputs: bool = True,
 ) -> Dict[str, pd.DataFrame]:
     gpu_arch_json = resolve_gpu_arch(
         gpu_arch_json_path=gpu_arch_json_path,
@@ -1042,13 +1043,31 @@ def generate_perf_report_pytorch(
 
         # update this dict with the perf_metrics_dfs
         dict_name2df.update(perf_metrics_dfs)
-        perf_report_sanity_check(
+        sanity_result = perf_report_sanity_check(
             perf_analyzer.tree.events,
             df_gpu_timeline,
             df_kernel_launchers,
             df_unified_perf,
             include_nccl=collective_analysis,
         )
+        if perf_analyzer.tree.trace_metadata.get("tracelens_training_graph_merge"):
+            if not all(
+                sanity_result[key]
+                for key in (
+                    "kl_time_pass",
+                    "up_time_pass",
+                    "kl_count_pass",
+                    "up_count_pass",
+                )
+            ):
+                raise ValueError(
+                    "Training graph performance report failed kernel time/count sanity checks"
+                )
+            if sanity_result["kl_mismatches"] or sanity_result["up_mismatches"]:
+                raise ValueError(
+                    "Training graph performance report has per-kernel attribution mismatches"
+                )
+            dict_name2df["graph_sanity"] = pd.DataFrame([sanity_result])
 
     # Kernel summary: aggregate per-kernel durations and counts
     if kernel_summary:
@@ -1172,12 +1191,13 @@ def generate_perf_report_pytorch(
                 print(f"Added {len(additional_dfs)} additional sheets from extension")
 
     # Write CSVs and/or Excel (independent options)
-    if output_xlsx_path is None and output_csvs_dir is None:
-        base_path = profile_json_path.rsplit(".json", 1)[0]
-        output_xlsx_path = base_path + "_perf_report.xlsx"
-    write_report_outputs(
-        dict_name2df, xlsx_path=output_xlsx_path, csvs_dir=output_csvs_dir
-    )
+    if write_outputs:
+        if output_xlsx_path is None and output_csvs_dir is None:
+            base_path = profile_json_path.rsplit(".json", 1)[0]
+            output_xlsx_path = base_path + "_perf_report.xlsx"
+        write_report_outputs(
+            dict_name2df, xlsx_path=output_xlsx_path, csvs_dir=output_csvs_dir
+        )
 
     return dict_name2df
 

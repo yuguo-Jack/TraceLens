@@ -559,7 +559,9 @@ def test_write_metrics_json(tmp_path):
     (tmp_path / "category_data").mkdir(parents=True)
     metrics = {"category": "gemm", "status": "OK", "total_time_ms": 100.0}
     path = write_metrics_json(metrics, str(tmp_path), "gemm")
-    assert path == os.path.join(tmp_path, "category_data", "gemm_metrics.json")
+    assert os.path.normpath(path) == os.path.join(
+        tmp_path, "category_data", "gemm_metrics.json"
+    )
     assert os.path.isfile(path)
     with open(path) as f:
         assert json.load(f) == metrics
@@ -3034,7 +3036,9 @@ def test_metrics_json_for_findings_and_empty_category(tmp_path):
     fp.parent.mkdir(parents=True)
     fp.write_text("x")
     mp = _metrics_json_for_findings(str(fp))
-    assert mp.endswith("category_data/gemm_metrics.json")
+    assert os.path.normpath(mp).endswith(
+        os.path.join("category_data", "gemm_metrics.json")
+    )
     assert _category_findings_empty(str(fp)) is False
     (tmp_path / "category_data").mkdir()
     (tmp_path / "category_data" / "gemm_metrics.json").write_text(

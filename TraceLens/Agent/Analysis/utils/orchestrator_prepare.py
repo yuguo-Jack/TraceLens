@@ -87,7 +87,15 @@ _CASE_A_MAX_DELTA = 15  # G2: |n1 - n2| must be <= this
 _CASE_A_MAX_N1 = 30  # G3: n1 must be <= this
 
 # Event categories that are never fusion candidate containers
-_SKIP_CATEGORIES = {"kernel", "gpu_memcpy", "gpu_memset", "cuda_runtime", "cuda_driver"}
+_SKIP_CATEGORIES = {
+    "kernel",
+    "gpu_memcpy",
+    "gpu_memset",
+    "cuda_runtime",
+    "cuda_driver",
+    "hip_runtime",
+    "hip_driver",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -781,6 +789,58 @@ def _compute_data_in_out(op_category, perf_params_str, data_moved_mb):
     return half
 
 
+def _architecture_metadata(platform_specs):
+    """Keep unknown peaks and the complete HCU qualification contract in metadata."""
+    mem_bw = platform_specs.get("mem_bw_gbps")
+    result = {
+        "peak_mem_bw_tbs": mem_bw / 1000 if mem_bw is not None else None,
+        "max_achievable_tflops": platform_specs.get("max_achievable_tflops", {}),
+        "memory_gb": platform_specs.get("memory_gb"),
+    }
+    if "hcu_roofline" in platform_specs:
+        result["hcu_arch"] = platform_specs
+        result["roofline_reference_kind"] = "measured_envelope"
+        result["achievable_e2e_savings_pct"] = None
+    return result
+
+
+def _hcu_category_time_metrics(category_df):
+    """Preserve missing HCU times and separate host duration from sync proof."""
+
+    def summed(columns):
+        for column, divisor in columns:
+            if column in category_df.columns:
+                values = pd.to_numeric(category_df[column], errors="coerce")
+                if (
+                    not values.empty
+                    and values.notna().all()
+                    and ((values >= 0) & (values < float("inf"))).all()
+                ):
+                    return round(float(values.sum()) / divisor, 3), column
+                return None, column
+        return None, None
+
+    gpu, gpu_column = summed(
+        (("Kernel Time (µs)_sum", 1000), ("total_direct_kernel_time_ms", 1))
+    )
+    cpu, cpu_column = summed((("total_duration_us", 1000), ("Duration (µs)_sum", 1000)))
+    return {
+        "gpu_kernel_time_ms": gpu,
+        "cpu_duration_ms": cpu,
+        "sync_time_ms": None,
+        "sync_ops_count": None,
+        "has_sync_bottleneck": None,
+        "time_metric_availability": {
+            "gpu_kernel_time_ms": "available" if gpu is not None else "unavailable",
+            "cpu_duration_ms": "available" if cpu is not None else "unavailable",
+            "sync_time_ms": "unavailable",
+            "gpu_source_column": gpu_column,
+            "cpu_source_column": cpu_column,
+        },
+        "time_metric_note": "Kernel and CPU event sums can overlap. CPU duration minus kernel time does not prove synchronization; inspect runtime events and the workload source.",
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Prepare category data for TraceLens analysis"
@@ -789,8 +849,11 @@ def main():
     parser.add_argument(
         "--platform",
         required=True,
-        choices=list_platforms(),
-        help="AMD platform (MI300X, MI325X, MI350X, MI355X, MI455X)",
+        help="Bundled/extension platform, or the device name in --gpu-arch-json",
+    )
+    parser.add_argument(
+        "--gpu-arch-json",
+        help="Explicit site architecture JSON; HCU peaks need measured provenance",
     )
     parser.add_argument("--output-dir", required=True, help="Output directory")
     parser.add_argument(
@@ -811,6 +874,11 @@ def main():
     )
 
     args = parser.parse_args()
+
+    if args.gpu_arch_json is None and args.platform not in list_platforms():
+        parser.error(
+            "Platform is not bundled; provide --gpu-arch-json with the actual device identity"
+        )
 
     trace_path = args.trace_path
     platform = args.platform
@@ -855,7 +923,12 @@ def main():
     ]:
         os.makedirs(d, exist_ok=True)
 
-    platform_specs = load_arch(platform)
+    platform_specs = (
+        load_arch(platform, args.gpu_arch_json)
+        if args.gpu_arch_json is not None
+        else load_arch(platform)
+    )
+    architecture_metadata = _architecture_metadata(platform_specs)
 
     # ============================================================================
     # STEP 3: Assess GPU Utilization
@@ -866,6 +939,25 @@ def main():
     gpu_utilization_metrics = _gpu_utilization_metrics_from_gpu_timeline_df(
         gpu_timeline
     )
+    if "hcu_arch" in architecture_metadata:
+        # Native reporting columns alone cannot attest to HCU model/peak
+        # qualification; keep a complete per-op audit next to the manifest.
+        from TraceLens.PerfModel.hcu_roofline import export_hcu_roofline
+
+        roofline_frame = pd.read_csv(
+            os.path.join(trace1_csv_dir, "unified_perf_summary.csv")
+        )
+        roofline_audit = export_hcu_roofline(
+            roofline_frame,
+            platform_specs,
+            wallclock_time_us=gpu_utilization_metrics["total_time_ms"] * 1000,
+        )
+        with open(
+            os.path.join(output_dir, "category_data", "hcu_roofline.json"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            json.dump(roofline_audit, f, indent=2, allow_nan=False)
     trace2_gpu_utilization = None
     trace2_ops_summary_by_category = None
 
@@ -1244,6 +1336,7 @@ def main():
 
     for category_name in categories:
         category_df = unified_df[unified_df["enhanced_category"] == category_name]
+
         display_name = category_df.iloc[0]["display_name"]
 
         print(f"\n  Category: {display_name} ({category_name})")
@@ -1260,9 +1353,7 @@ def main():
         # Create metadata JSON
         metadata = {
             "platform": platform,
-            "peak_mem_bw_tbs": platform_specs["mem_bw_gbps"] / 1000,
-            "max_achievable_tflops": platform_specs["max_achievable_tflops"],
-            "memory_gb": platform_specs.get("memory_gb"),
+            **architecture_metadata,
             "trace_path": trace_path,
             "output_dir": output_dir,
             "category": display_name,
@@ -1296,9 +1387,7 @@ def main():
 
     cpu_idle_metadata = {
         "platform": platform,
-        "peak_mem_bw_tbs": platform_specs["mem_bw_gbps"] / 1000,
-        "max_achievable_tflops": platform_specs["max_achievable_tflops"],
-        "memory_gb": platform_specs.get("memory_gb"),
+        **architecture_metadata,
         "trace_path": trace_path,
         "output_dir": output_dir,
         "category": "CPU/Idle Analysis",
@@ -1349,9 +1438,7 @@ def main():
         # Create multi-kernel metadata
         multi_kernel_metadata = {
             "platform": platform,
-            "peak_mem_bw_tbs": platform_specs["mem_bw_gbps"] / 1000,
-            "max_achievable_tflops": platform_specs["max_achievable_tflops"],
-            "memory_gb": platform_specs.get("memory_gb"),
+            **architecture_metadata,
             "trace_path": trace_path,
             "output_dir": output_dir,
             "category": "Multi-Kernel Issues",
@@ -1419,6 +1506,18 @@ def main():
             continue  # Skip system-level categories - no ops CSV
 
         category_df = unified_df[unified_df["enhanced_category"] == category_name]
+
+        if "hcu_arch" in architecture_metadata:
+            times = _hcu_category_time_metrics(category_df)
+            cat_info.update(times)
+            metadata_file = cat_info.get("metadata_file")
+            if metadata_file and os.path.exists(metadata_file):
+                with open(metadata_file, encoding="utf-8") as stream:
+                    metadata = json.load(stream)
+                metadata["time_breakdown"] = times
+                with open(metadata_file, "w", encoding="utf-8") as stream:
+                    json.dump(metadata, stream, indent=2)
+            continue
 
         # Calculate GPU kernel time (ms)
         if "Kernel Time (µs)_sum" in category_df.columns:
@@ -1494,6 +1593,26 @@ def main():
         "categories": exported_categories,
         "time_metric_note": "Use gpu_kernel_time_ms for bottleneck prioritization. cpu_duration_ms includes sync/launch overhead.",
     }
+    if "hcu_arch" in architecture_metadata:
+        from TraceLens.Agent.Analysis.utils.artifact_bindings import (
+            prepared_source_bindings,
+        )
+
+        manifest["prepared_sources"] = prepared_source_bindings(
+            trace_path, args.gpu_arch_json
+        )
+        manifest["time_metric_note"] = (
+            "GPU/CPU durations are event sums, not wallclock or proven sync times. Missing metrics are null. Use the GPU timeline for span and overlap accounting."
+        )
+        manifest["hcu_roofline"] = {
+            "audit_file": os.path.join(
+                output_dir, "category_data", "hcu_roofline.json"
+            ),
+            "reference_kind": "measured_envelope",
+            "qualification": platform_specs["hcu_roofline"]["qualification"],
+            "achievable_e2e_savings_pct": None,
+            "kernel_time_sum_is_wallclock": False,
+        }
     if comparison_scope == "comparative" and trace2_gpu_utilization is not None:
         manifest["trace2_gpu_utilization"] = trace2_gpu_utilization
         manifest["trace2_ops_summary_by_category"] = trace2_ops_summary_by_category

@@ -160,6 +160,11 @@ def calculate_time_metrics(ops_df: pd.DataFrame, metadata: dict) -> dict:
         total_time_us = ops_df["Kernel Time (µs)_sum"].sum()
         total_time_ms = total_time_us / 1000
         total_compute_ms = metadata.get("gpu_utilization", {}).get("total_time_ms", 1)
+        if metadata.get("hcu_arch") is not None:
+            total_compute_ms *= (
+                metadata.get("gpu_utilization", {}).get("computation_time_percent", 0)
+                / 100
+            )
         percent_of_compute = (
             (total_time_ms / total_compute_ms) * 100 if total_compute_ms > 0 else 0
         )
@@ -569,9 +574,47 @@ def build_operation_metrics(
             round(time_ms / e2e_ms_total * 100, 2) if e2e_ms_total > 0 else None
         )
 
-        efficiency = calculate_efficiency(
-            row, peak_mem_bw, maf, comparison_scope=comparison_scope
-        )
+        if metadata.get("hcu_arch") is not None:
+            from TraceLens.PerfModel.hcu_roofline import evaluate_hcu_roofline_row
+
+            hcu_roofline = evaluate_hcu_roofline_row(row, metadata["hcu_arch"])
+            # Keep the upstream efficiency shape, but do not promote an
+            # arbitrary measured envelope to quantified optimization impact.
+            efficiency = {
+                "tflops_achieved": None,
+                "tb_s_achieved": None,
+                "efficiency_percent": hcu_roofline["efficiency_vs_measured_pct"],
+                "bound_type": hcu_roofline["reference_bound"],
+                "flops_per_byte": None,
+                "compute_spec": hcu_roofline["compute_spec"],
+                "resolved_peak_maf": hcu_roofline.get("resolved_compute_tflops"),
+                "resolved_peak_mem_bw": (
+                    (hcu_roofline.get("resolved_memory_gbps") or 0) / 1000
+                    if hcu_roofline.get("resolved_memory_gbps")
+                    else None
+                ),
+                "warning": " ".join(hcu_roofline["warnings"]) or None,
+                "is_anomaly": (hcu_roofline["efficiency_vs_measured_pct"] or 0) > 100,
+                "reference_kind": "measured_envelope",
+                "optimization_impact_qualified": False,
+            }
+            if hcu_roofline.get("workload_status") == "qualified":
+                mean_us = hcu_roofline["observed_kernel_time_mean_us"]
+                efficiency["tflops_achieved"] = (
+                    hcu_roofline["modeled_flops_per_invocation"] / mean_us / 1e6
+                )
+                efficiency["tb_s_achieved"] = (
+                    hcu_roofline["modeled_bytes_per_invocation"] / mean_us / 1e6
+                )
+                if hcu_roofline["modeled_bytes_per_invocation"]:
+                    efficiency["flops_per_byte"] = (
+                        hcu_roofline["modeled_flops_per_invocation"]
+                        / hcu_roofline["modeled_bytes_per_invocation"]
+                    )
+        else:
+            efficiency = calculate_efficiency(
+                row, peak_mem_bw, maf, comparison_scope=comparison_scope
+            )
 
         op_metric = {
             "name": op_name,
@@ -581,6 +624,9 @@ def build_operation_metrics(
             "percent_of_total": percent_of_total,
             "efficiency": efficiency,
         }
+        if metadata.get("hcu_arch") is not None:
+            op_metric["hcu_roofline"] = hcu_roofline
+            op_metric["time_basis"] = "summed_kernel_duration_not_wallclock"
 
         # Add efficiency warning if present (for anomaly detection)
         if efficiency.get("warning"):
@@ -706,6 +752,10 @@ def _row_impact_score(
         return None
 
     eff = op.get("efficiency", {})
+    if eff.get("optimization_impact_qualified") is False:
+        # Neither missing HCU work nor a sustained-envelope ratio establishes
+        # an achievable E2E improvement, including the heuristic fallback.
+        return None
     eff_pct = eff.get("efficiency_percent")
     if eff_pct is not None and not eff.get("is_anomaly") and baseline_ms > 0:
         gap_mid = (TARGET_MID / TARGET_HIGH) * max(0, 1 - eff_pct / TARGET_HIGH)
@@ -1034,6 +1084,13 @@ def get_peak_specs(metadata: dict) -> dict:
     Handles both the dict-style max_achievable_tflops and the legacy
     scalar peak_bf16_maf_tflops formats.
     """
+    if metadata.get("hcu_arch") is not None:
+        return {
+            "peak_maf_tflops": None,
+            "sustained_reference_tflops": metadata.get("max_achievable_tflops", {}),
+            "peak_mem_bw_tbs": get_peak_mem_bw_tbs(metadata),
+            "reference_kind": "measured_envelope",
+        }
     return {
         "peak_maf_tflops": (
             metadata.get("max_achievable_tflops", {}).get("matrix_bf16")

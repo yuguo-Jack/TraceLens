@@ -58,6 +58,17 @@ Use vendor-agnostic terminology in all narrative text (Insight, Action, Impact):
 
 ### Step 1: Generate Metrics and Build the Candidate List
 
+**HCU exception:** With `status: UNQUALIFIED` and
+`reference_kind: measured_envelope`, read `fusion_opportunities` and retained
+candidate evidence as hypotheses. Empty `impact_estimates` means savings are
+unqualified; it does not mean no structural opportunity exists. A source-verified
+producer/consumer opportunity may carry null impact. Separate hypothetical
+launch/traffic changes from proven feasibility. Reject independent or all-GEMM
+groups. Verify tensor dependencies and backward semantics before proposing
+fusion; runtime wrapper containment alone is not evidence. Use native
+non-quantifiable fusion markers and require paired workload validation before
+claiming E2E improvement.
+
 Run the deterministic fusion analysis script to produce `kernel_fusion_metrics.json`:
 
 ```bash
@@ -76,7 +87,7 @@ Then read `<output_dir>/category_data/kernel_fusion_metrics.json`. The `impact_e
 - `time_ms`: Total candidate time across all instances
 - `warning`: Present when some kernels lack perf models
 
-If `impact_estimates` is empty (or `status` is `NO_DATA`), skip Steps 2-4 entirely. Write **only** the three-line fallback file shown at the end of Step 4 — no P-item cards, no Detailed Analysis blocks, no Impact Summary table. Just the `# heading`, blank line, and the single sentence "No kernel fusion opportunities detected."
+For standard architectures, if `impact_estimates` is empty (or `status` is `NO_DATA`), skip Steps 2-4 entirely. Write **only** the three-line fallback file shown at the end of Step 4 — no P-item cards, no Detailed Analysis blocks, no Impact Summary table. Just the `# heading`, blank line, and the single sentence "No kernel fusion opportunities detected." HCU measured-envelope hypotheses follow the exception above and preserve null impact.
 
 For each entry in `impact_estimates`, look up the matching candidate in `<output_dir>/category_data/fusion_candidates.json` by `base_name == operation` to pull the descriptive fields used in Steps 2-4:
 
@@ -101,7 +112,7 @@ For each entry in `impact_estimates`, look up the matching candidate in `<output
 - `total_kernel_time_us_trace1`: Total GPU time of trace1 across all instances
 - `total_kernel_time_us_trace2`: Total GPU time of trace2 across all instances
 
-Do NOT iterate `fusion_candidates.json` directly. Candidates absent from `impact_estimates` were dropped by the deterministic gate and must not be turned into findings.
+For standard architectures, do NOT iterate `fusion_candidates.json` directly. Candidates absent from `impact_estimates` were dropped by the deterministic gate and must not be turned into findings. The HCU exception uses retained `fusion_opportunities` as unqualified hypotheses.
 
 ### Step 2: Classify Each Candidate
 

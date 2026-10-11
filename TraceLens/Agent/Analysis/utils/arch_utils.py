@@ -54,8 +54,23 @@ def list_platforms():
     return sorted(_collect_arch_jsons())
 
 
-def load_arch(platform: str) -> dict:
-    """Read and return the arch JSON dict for the given platform."""
-    path = _collect_arch_jsons()[platform]
-    with open(path) as f:
-        return json.load(f)
+def load_arch(platform: str, gpu_arch_json_path=None) -> dict:
+    """Load a bundled/extension platform or an explicit site architecture file.
+
+    An explicit HCU file is qualified before native categories receive its
+    measured envelope. Missing calibration stays unknown; another platform's
+    values cannot substitute for the selected device.
+    """
+    if gpu_arch_json_path is None:
+        path = _collect_arch_jsons()[platform]
+    else:
+        path = os.fspath(gpu_arch_json_path)
+    with open(path, encoding="utf-8") as f:
+        arch = json.load(f)
+    from TraceLens.PerfModel.hcu_roofline import is_hcu_arch, qualify_hcu_arch
+
+    if is_hcu_arch(arch):
+        return qualify_hcu_arch(arch, expected_name=platform)
+    if gpu_arch_json_path is not None and arch.get("name") != platform:
+        raise ValueError("Architecture name does not match the selected platform")
+    return arch

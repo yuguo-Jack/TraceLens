@@ -9,7 +9,48 @@ import json
 import argparse
 import sys
 import torch
-from utils import TensorCfg, build_tensor, benchmark_func
+
+try:
+    from .utils import TensorCfg, build_tensor, benchmark_func
+    from .safety import ReplayContractError
+    from .event_replay import EventReplayer
+    from .hcu_replay import benchmark_replayer
+except ImportError:  # Retain the original direct-file invocation.
+    from TraceLens.EventReplay.utils import TensorCfg, build_tensor, benchmark_func
+    from TraceLens.EventReplay.safety import ReplayContractError
+    from TraceLens.EventReplay.event_replay import EventReplayer
+    from TraceLens.EventReplay.hcu_replay import benchmark_replayer
+
+
+def _event_from_legacy_ir(repro_info):
+    """Legacy IR has explicit layouts; translate it to the same safe contract."""
+    metadata = {
+        key: []
+        for key in ("Input type", "Input Dims", "Input Strides", "Concrete Inputs")
+    }
+    ir = repro_info["replay_ir"]
+    for entry in ir["list_pos_args"] + ir["list_kwargs"]:
+        value, arg_type = entry["value"], entry["arg_type"]
+        if arg_type.startswith("Tensor") and value is not None:
+            dtype, shape, stride, concrete = (
+                value["dtype"],
+                value["shape"],
+                value["strides"],
+                "",
+            )
+        else:
+            shape, stride = [], []
+            if value is None:
+                dtype, concrete = "", ""
+            elif isinstance(value, list):
+                dtype = "ScalarList"
+                concrete = json.dumps(value)
+            else:
+                dtype = "Scalar"
+                concrete = str(value).lower() if isinstance(value, bool) else str(value)
+        for key, v in zip(metadata, (dtype, shape, stride, concrete)):
+            metadata[key].append(v)
+    return {"name": repro_info["op_name"], "cat": "cpu_op", "args": metadata}
 
 
 def _get_args_kwargs_from_ir(
@@ -31,7 +72,7 @@ def _get_args_kwargs_from_ir(
     for arg in event_replay_IR["list_kwargs"]:
         val = arg["value"]
         key = arg["arg_name"]
-        if arg["arg_type"].startswith("Tensor"):
+        if arg["arg_type"].startswith("Tensor") and val is not None:
             cfg = TensorCfg(**val)  # Reconstruct from dict
             kwargs[key] = build_tensor(cfg, device=device)
         else:
@@ -84,8 +125,7 @@ if __name__ == "__main__":
 
     # --- Device Check ---
     if args.device == "cuda" and not torch.cuda.is_available():
-        print("Warning: CUDA device requested but not available. Falling back to CPU.")
-        args.device = "cpu"
+        parser.error("CUDA/HIP device requested but not available")
 
     print(f"Running repro from '{args.repro_file}' on device '{args.device}'")
 
@@ -103,11 +143,25 @@ if __name__ == "__main__":
 
         op_name = repro_info["op_name"]
         replay_ir = repro_info["replay_ir"]
+        if args.op_filter and args.op_filter not in op_name:
+            continue
+        if args.op_limit is not None and replayed_count + errors >= args.op_limit:
+            break
         print(f"\n[{replayed_count + 1}/{len(repro_data_list)}] Replaying: {op_name}")
 
         # Get the PyTorch operation function
         try:
-            func, _ = torch._C._jit_get_operation(op_name)
+            if repro_info.get("input_semantics", "synthetic") != "synthetic":
+                raise ReplayContractError(
+                    "Captured values require the hcu_replay bundle runner"
+                )
+            event = repro_info.get("event") or _event_from_legacy_ir(repro_info)
+            replayer = EventReplayer(
+                event,
+                device=args.device,
+                operator_schema=repro_info.get("operator_schema"),
+            )
+            func = replayer.replay
         except Exception as e:
             print(
                 f"  Error: Could not find PyTorch operation '{op_name}'. Is the PyTorch version compatible? Error: {e}"
@@ -127,7 +181,7 @@ if __name__ == "__main__":
                 print(f"  Keyword Args:")
                 for arg in replay_ir["list_kwargs"]:
                     print(f"  {arg['arg_name']} {arg['arg_type']}: {arg['value']}")
-            pos_args, kwargs = _get_args_kwargs_from_ir(replay_ir, device=args.device)
+            pos_args, kwargs = replayer.args, replayer.kwargs
         except Exception as e:
             print(
                 f"  Error: Failed to reconstruct arguments for '{op_name}'. Error: {e}"
@@ -143,7 +197,8 @@ if __name__ == "__main__":
             torch.cuda.synchronize()
         # --- Call the function ---
         try:
-            result = func(*pos_args, **kwargs)
+            result = func()
+            timing = benchmark_replayer(replayer, warmup=50, steps=100, max_seconds=30)
         except Exception as e:
             print(f"  Error: Failed to execute '{op_name}'. Error: {e}")
             if args.stop_on_error:
@@ -151,9 +206,7 @@ if __name__ == "__main__":
             errors += 1
             continue
         # --- Benchmark the function ---
-        mean_time_us = benchmark_func(
-            lambda: func(*pos_args, **kwargs), args.device, warmup=50, avg_steps=100
-        )
+        mean_time_us = timing["mean_us"]
         print(f"  Average time taken: {mean_time_us:.2f} microseconds")
         if "count" in repro_info:
             count_workload = repro_info["count"]
@@ -191,8 +244,8 @@ if __name__ == "__main__":
     print(f"Total operations in file: {len(repro_data_list)}")
     if args.op_filter:
         print(f"Filter applied: '{args.op_filter}'")
-    print(f"Attempted replays: {replayed_count}")
-    print(f"Successful replays: {replayed_count - errors}")
+    print(f"Attempted replays: {replayed_count + errors}")
+    print(f"Successful replays: {replayed_count}")
     print(f"Errors encountered: {errors}")
     print("----------------------")
 

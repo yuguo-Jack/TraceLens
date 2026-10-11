@@ -28,6 +28,18 @@ Applies to both tiers (compute → `category_findings/`, system → `system_find
 
 ## No actionable findings
 
+**HCU measured envelopes:** Read each operation's `hcu_roofline` contract before
+interpreting efficiency. Conditional ratios and screening scores do not qualify
+numeric optimization impact. Preserve diagnostic observations and calibration
+or validation hypotheses in an assessment before the consumed sections. Keep
+unsupported work and missing references unknown. Do not manufacture compute
+P-items or numeric impacts when `category_findings` is empty.
+
+**Reviewed negative system results:** Successful native metrics showing no
+flagged CPU/idle or multi-kernel issues (or explicit `NO_DATA`) authorize an
+assessment before empty consumed sections. Missing or failed metrics cannot
+justify empty findings. The native validator supports reviewed negative results.
+
 **Compute tier:** There is no actionable bottleneck when the analyzer left
 `category_data/<category>_metrics.json::category_findings` as an **empty array**
 `[]`. In that case emit **empty** `## Recommendations` and **empty**

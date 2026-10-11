@@ -96,6 +96,8 @@ cmake-build-*/
 
 # Build / bundler caches (common in JS tooling; dist/ and out/ also above)
 .cache/
+.work/
+.tracelens-cache/
 .parcel-cache/
 .vite/
 .next/
