@@ -18,6 +18,7 @@ No trace files are written; everything operates on in-memory dicts.
 """
 
 import gzip, json, os, zipfile, sys, pytest
+from pathlib import Path
 from typing import Dict, List
 from TraceLens.TraceUtils.split_trace import main as split
 from TraceLens.TraceUtils.utils.annotation_utils import IterationAnnotation
@@ -1059,6 +1060,13 @@ def test_main_explicit_iteration_range(tmp_path):
         sys.argv = old_argv
 
     assert out_dir.exists()
+    details = json.loads((out_dir / "execution_details.json").read_text())
+    assert details[0]["idx"] == "2:6"
+    extracted = Path(details[0]["output_path"])
+    assert ":" not in extracted.name
+    assert extracted.stat().st_size > 0
+    with gzip.open(extracted, "rt") as stream:
+        assert json.load(stream)["traceEvents"]
 
 
 def _invoke_main(trace_path, out_dir, *flags):

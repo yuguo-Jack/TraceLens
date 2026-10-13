@@ -9,6 +9,7 @@
 import json
 import os, sys
 import tempfile
+import pytest
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 SEM = os.path.join(REPO_ROOT, "TraceLens", "Agent", "Analysis", "semantic_analyses")
@@ -126,8 +127,11 @@ def test_extract_kernel_sequence():
     assert seq[1]["cat"] == "gpu_memcpy"
 
 
-def test_detect_graph_mode():
-    by_cat = {"cuda_runtime": [{"name": "hipGraphLaunch"}, {"name": "other"}]}
+@pytest.mark.parametrize(
+    "category", ["cuda_runtime", "cuda_driver", "hip_runtime", "hip_driver"]
+)
+def test_detect_graph_mode(category):
+    by_cat = {category: [{"name": "hipGraphLaunch"}, {"name": "other"}]}
     is_graph, launches = extract_trace_data.detect_graph_mode(by_cat)
     assert is_graph is True
     assert len(launches) == 1

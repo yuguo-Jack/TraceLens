@@ -430,8 +430,8 @@ class TestEditable:
     def test_extra_exts_extend_editable_set(self):
         # A caller can treat extra native extensions as editable without editing
         # the module; leading dot optional and matching is case-insensitive.
-        assert is_editable_source("/pkg/kernel.cc") is False
-        assert is_editable_source("/pkg/kernel.cc", extra_exts=(".cc",)) is True
+        assert is_editable_source("/pkg/kernel.c") is False
+        assert is_editable_source("/pkg/kernel.c", extra_exts=(".c",)) is True
         assert is_editable_source("/pkg/kernel.CXX", extra_exts=("cxx",)) is True
 
     def test_non_source_and_empty(self):

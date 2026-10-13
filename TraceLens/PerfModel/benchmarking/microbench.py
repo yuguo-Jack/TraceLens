@@ -170,6 +170,9 @@ def _bpe(dtype: torch.dtype) -> int:
 
 def _arch_product_name(gpu_name: str, mem_gb: float) -> str:
     """Short name to match arch JSONs like `MI300X.json` (e.g. 'MI300X')."""
+    # HCU memory capacity does not identify an AMD product tier.
+    if re.search(r"\b(?:Hygon|HCU|DCU|BW\d+)", gpu_name, re.IGNORECASE):
+        return gpu_name.strip()
     # Client parts report e.g. "AMD Radeon 8060S Graphics": the model sits
     # between the brand and the trailing "Graphics", which names no model.
     match = re.search(r"\bRadeon\s+(.+?)\s+Graphics\b", gpu_name, re.IGNORECASE)

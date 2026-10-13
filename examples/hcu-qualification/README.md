@@ -32,3 +32,15 @@ See [counter input](../../docs/how-to/hcu-xprof-xcompute.md) and
 Keep outputs private. Bind manifests to actual files, signatures and hashes;
 do not substitute checked-in sample data for hardware execution. Reusable reader
 tests use authored fixtures and run without these captures.
+
+`analyze_probe.py --probe-dir <probe> --output <new-directory>` consumes the
+Torch probe and exercises the native CPU analysis tools. Add `--execute-replay`
+only with an admitted HCU device; it loads captured values with `weights_only`.
+Its native Agent stage produces metrics, not fabricated findings. Successful
+commands are recorded in `execution.json`; inspect the actual tables as well.
+
+`collective_probe.py` runs under `torchrun --standalone --nproc-per-node=2` on
+two admitted devices. It checks the all-reduce result and records per-rank traces
+with actual process-group metadata. The native collective report must contain
+both ranks and four matched collectives. Do not use this intentionally bounded,
+synchronized probe to establish a cluster's peak bandwidth.

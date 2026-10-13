@@ -9,9 +9,10 @@ import gzip
 import os
 from collections import defaultdict
 import math
+from itertools import chain
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from ..util import DataLoader
+from ..util import DataLoader, TraceEventUtils
 
 
 def _default_filter_fn(event, include_pyfunc=False):
@@ -104,7 +105,14 @@ class TraceFuse:
         self._set_linking_key(events)
 
         self.fields_to_adjust_offset = ["id", "pid", self.linking_key]
-        self._set_offset_multiplier(events)
+        # Every rank contributes to the namespace bound. A later rank can have
+        # much larger IDs than rank zero, even for the same training step.
+        other_events = (
+            event
+            for path in list(self.rank2filepath.values())[1:]
+            for event in DataLoader.load_data(path)["traceEvents"]
+        )
+        self._set_offset_multiplier(chain(events, other_events))
 
     def _set_linking_key(self, events):
         # load the first file to get the linking key
@@ -112,7 +120,7 @@ class TraceFuse:
             (
                 event
                 for event in events
-                if event.get("cat") in ["cuda_runtime", "cuda_driver"]
+                if event.get("cat") in TraceEventUtils.RuntimeCategories
                 and "launch" in event.get("name", "").lower()
             ),
             None,

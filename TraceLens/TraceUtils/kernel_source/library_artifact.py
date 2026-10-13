@@ -40,18 +40,25 @@ _SOLUTION_RE = re.compile(r"^Cijk_(A[a-z]+)_(B[a-z]+)_([A-Za-z0-9]+)")
 
 # rocBLAS/hipBLASLt ship their solution libraries under these subpaths of a ROCm
 # install; each holds the per-arch ``.dat`` logic files (and ``.co``/.hsaco code).
-_LIBRARY_SUBDIRS = ("lib/rocblas/library", "lib/hipblaslt/library")
+_LIBRARY_SUBDIRS = (
+    "lib/rocblas/library",
+    "lib/hipblaslt/library",
+    "rocblas/lib/library",
+    "hipblaslt/lib/library",
+)
 _LIBRARY_NAMES = ("hipblaslt", "rocblas")
 
 
 def _rocm_bases() -> list[Path]:
-    """Candidate ROCm install roots: ``$ROCM_PATH``/``$ROCM_HOME``, then ``/opt/rocm*``."""
+    """Candidate ROCm/DTK roots from environment and standard /opt layouts."""
     bases: list[Path] = []
-    for var in ("ROCM_PATH", "ROCM_HOME"):
+    for var in ("ROCM_PATH", "ROCM_HOME", "DTK_PATH", "DTK_HOME"):
         val = os.environ.get(var, "").strip()
         if val:
             bases.append(Path(val))
     bases.extend(sorted(Path("/opt").glob("rocm*")))
+    if Path("/opt/dtk").is_dir():
+        bases.append(Path("/opt/dtk"))
     return bases
 
 

@@ -7,12 +7,14 @@
 """Shared utilities for the microbenchmark scripts.
 
 - resolve_physical_device: logical torch index -> physical id used by smi tools.
-- check_gpu_idle: pre-flight idle check via amdsmi or nvidia-smi.
+- check_gpu_idle: pre-flight idle check via hy-smi, amdsmi or nvidia-smi.
 """
 
 from __future__ import annotations
 
 import os
+import json
+import math
 import shutil
 import subprocess
 from typing import Any, Tuple
@@ -94,10 +96,65 @@ def _check_amd_gpu_idle(
 def check_gpu_idle(
     device: int, *, util_threshold: int = 5, mem_threshold_pct: float = 10.0
 ) -> Tuple[bool, str]:
-    """Pre-flight idle check via amdsmi or nvidia-smi. Returns (is_idle, msg).
-    Skipped (returns True) if neither library/tool is available."""
+    """Pre-flight utilization check. Returns (is_idle, msg), not a reservation.
+
+    HCU hy-smi rejects ambiguous mappings and missing metrics. The legacy AMD/NV
+    fallback may skip unavailable tools; callers still need resource admission.
+    """
     phys, src = resolve_physical_device(device)
     dev_tag = f"logical {device} -> physical {phys} (via {src})"
+
+    hcu_smi = shutil.which("hy-smi")
+    if hcu_smi:
+        # An ambiguous visibility mapping or unavailable metric cannot grant
+        # admission on a shared HCU device. The caller may explicitly override.
+        if "fallback" in src or os.environ.get("ROCR_VISIBLE_DEVICES"):
+            return (
+                False,
+                f"hy-smi: unresolved device mapping ({src}); verify physical device admission",
+            )
+        try:
+            result = subprocess.run(
+                [
+                    hcu_smi,
+                    "--showuse",
+                    "--showmeminfo",
+                    "vram",
+                    "--json",
+                    "-d",
+                    str(phys),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode:
+                return (
+                    False,
+                    f"hy-smi {dev_tag}: query failed ({result.returncode}); idle state unknown",
+                )
+            row = json.loads(result.stdout)[f"card{phys}"]
+            util = float(row["HCU use (%)"])
+            used = float(row["vram Total Used Memory (MiB)"])
+            total = float(row["vram Total Memory (MiB)"])
+            if (
+                not all(math.isfinite(v) for v in (util, used, total))
+                or not 0 <= util <= 100
+                or not 0 <= used <= total
+                or total <= 0
+            ):
+                raise ValueError("Invalid utilization/memory metrics")
+        except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError):
+            return (
+                False,
+                f"hy-smi {dev_tag}: missing or invalid metrics; idle state unknown",
+            )
+        pct = 100.0 * used / total
+        idle = util <= util_threshold and pct <= mem_threshold_pct
+        return (
+            idle,
+            f"hy-smi {dev_tag}: {'idle' if idle else 'busy'} (util={util}% mem={pct:.1f}%)",
+        )
 
     try:
         import amdsmi  # noqa: F401

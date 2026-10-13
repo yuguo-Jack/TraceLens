@@ -256,11 +256,19 @@ def get_dfs_short_kernels(
         inplace=True,
     )
 
+    # This helper is also used directly, before the main report initializes
+    # total_time_ms. Derive the same GPU-span denominator without inventing an
+    # end-to-end training time or treating an empty span as zero-cost work.
+    total_time_ms = getattr(perf_analyzer, "total_time_ms", None)
+    if total_time_ms is None:
+        timeline = perf_analyzer.get_df_gpu_timeline()
+        total = timeline.loc[timeline["type"] == "total_time", "time ms"]
+        total_time_ms = float(total.iloc[0]) if not total.empty else float("nan")
+    total_time_us = total_time_ms * 1e3 if total_time_ms > 0 else float("nan")
+
     # Add percentage contribution to total time
     df_grouped["Short Kernel duration (µs) percent of total time"] = (
-        df_grouped["Short Kernel duration (µs) sum"]
-        / (perf_analyzer.total_time_ms * 1e3)
-        * 100
+        df_grouped["Short Kernel duration (µs) sum"] / total_time_us * 100
     )
 
     # Sort: primary by total short-kernel time (desc), then all other columns for stable order
@@ -335,7 +343,7 @@ def trunc_kernel_details(row, kernel_detail_col, trunc_length=64):
     truncated_details = []
     for detail in row[kernel_detail_col]:
         truncated_name = (
-            detail["name"][:trunc_length] + "..."
+            detail["name"][: max(0, trunc_length - 3)] + "..."[:trunc_length]
             if len(detail["name"]) > trunc_length
             else detail["name"]
         )
@@ -819,7 +827,7 @@ def generate_perf_report_pytorch(
                 name_filters=["vllm::unified_attention_with_output"]
             )
             td = TraceDiff(perf_analyzer.tree, perf_analyzer2.tree)
-            td.generate_tracediff_report()
+            td.generate_tracediff_report(collapse_identical=False)
             _tracediff_diff_stats = td.diff_stats_df
         elif precomputed_diff_stats and not df_unified_perf.empty:
             _tracediff_diff_stats = pd.read_csv(precomputed_diff_stats)

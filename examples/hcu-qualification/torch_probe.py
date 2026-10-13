@@ -32,6 +32,7 @@ def main():
         "torch": torch.__version__,
         "hip": torch.version.hip,
         "device": str(props),
+        "device_name": props.name,
         "gfx": props.gcnArchName,
         "workload": "qualification-only-not-model-performance",
         "dtype": "float32",

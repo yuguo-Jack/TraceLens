@@ -3,6 +3,7 @@
 #
 # See LICENSE for license information.
 ###############################################################################
+
 """Contracts for isolated, deterministic operator replay (including HIP/HCU).
 
 A profiler records tensor metadata, not tensor values, aliasing or training

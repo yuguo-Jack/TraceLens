@@ -3,6 +3,7 @@
 #
 # See LICENSE for license information.
 ###############################################################################
+
 """SHA-bound same-shape operator replay and optional captured-output validation.
 
 HIP devices use PyTorch's ``cuda`` namespace. ``--device hcu`` additionally

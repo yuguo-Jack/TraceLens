@@ -41,10 +41,10 @@ def test_editable_repo_python():
 
 
 def test_editable_extra_exts_extends_native_set():
-    # A ".cc" file isn't editable by default, but callers can opt it in via
+    # A ".c" file isn't editable by default, but callers can opt it in via
     # extra_exts (with or without a leading dot, any case).
-    assert is_editable_source("/pkg/kernel.cc") is False
-    assert is_editable_source("/pkg/kernel.cc", extra_exts=(".cc",)) is True
+    assert is_editable_source("/pkg/kernel.c") is False
+    assert is_editable_source("/pkg/kernel.c", extra_exts=(".c",)) is True
     assert is_editable_source("/pkg/kernel.CXX", extra_exts=("cxx",)) is True
 
 

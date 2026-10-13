@@ -8,7 +8,8 @@ See LICENSE for license information.
 
 > **HCU integration fork:** the `hcu` branch preserves upstream functionality and
 > carries focused compatibility changes for HCU workflows. See
-> [integration scope, capability requirements and validation status](docs/hcu-integration.md).
+> [HCU installation, capabilities and usage](README-HCU.md) and
+> [the maintenance and validation contract](docs/hcu-integration.md).
 
 [![Tests](https://github.com/AMD-AGI/TraceLens/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/AMD-AGI/TraceLens/actions/workflows/unit-tests.yml)
 [![Lint](https://github.com/AMD-AGI/TraceLens/actions/workflows/lint.yml/badge.svg)](https://github.com/AMD-AGI/TraceLens/actions/workflows/lint.yml)

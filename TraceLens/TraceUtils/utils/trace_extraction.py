@@ -359,7 +359,9 @@ def extract_and_save_single_trace(
     for a in ancestors:
         if id(a) not in existing_events:
             iter_trace["traceEvents"].append(a)
-    range_label = f"{start}:{end}" if end - start > 1 else str(start)
+    # Colons create alternate data streams on Windows rather than normal files.
+    # Keep the original range syntax in the receipt, but use a portable filename.
+    range_label = f"{start}_to_{end}" if end - start > 1 else str(start)
     out_path = os.path.join(
         ctx.output_dir, f"{ctx.base_name}_iteration_{range_label}.json.gz"
     )

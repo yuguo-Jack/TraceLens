@@ -31,6 +31,7 @@ from annotation_metadata import gather_metadata
 from _helpers import load_json
 
 from TraceLens import GPUEventAnalyser
+from TraceLens.util import TraceEventUtils
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +143,14 @@ def extract_kernel_sequence(by_cat):
 
 
 def detect_graph_mode(by_cat):
-    rt = by_cat.get("cuda_runtime", [])
+    rt = sorted(
+        (
+            event
+            for cat in TraceEventUtils.RuntimeCategories
+            for event in by_cat.get(cat, [])
+        ),
+        key=lambda event: event.get("ts", 0),
+    )
     graph_launches = [e for e in rt if "GraphLaunch" in e.get("name", "")]
     return len(graph_launches) > 0, graph_launches
 

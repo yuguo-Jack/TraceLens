@@ -24,7 +24,7 @@ __all__ = ["is_editable_source"]
 
 # Native device-code extensions that are always editable. Canonical set, also
 # imported by ``index`` as its native scan set so the two can't drift.
-NATIVE_SOURCE_EXTS = (".cu", ".cuh", ".hip", ".h", ".hpp")
+NATIVE_SOURCE_EXTS = (".cu", ".cuh", ".hip", ".h", ".hpp", ".cpp", ".cc", ".cxx")
 
 # Path markers for compiler-generated Triton (torch.compile / inductor). These
 # files are produced at compile time and have no durable source to rewrite.

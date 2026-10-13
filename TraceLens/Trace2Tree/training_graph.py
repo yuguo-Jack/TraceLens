@@ -3,6 +3,7 @@
 #
 # See LICENSE for license information.
 ###############################################################################
+
 """Strict capture-to-replay attribution for explicitly annotated training graphs.
 
 This maps captured host structure to measured replay GPU events. It does not

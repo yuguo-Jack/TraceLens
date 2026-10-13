@@ -81,7 +81,7 @@ def render_analysis_json(analysis_md: "str | Path") -> Path:
     of scope for v1.
     """
     md_path = Path(analysis_md)
-    parser = AnalysisMdParser(md_path.read_text())
+    parser = AnalysisMdParser(md_path.read_text(encoding="utf-8"))
 
     report_info = parser.report_info()
     mode = report_info["mode"]
@@ -105,7 +105,8 @@ def render_analysis_json(analysis_md: "str | Path") -> Path:
 
     out_path = md_path.with_name("analysis.json")
     out_path.write_text(
-        json.dumps(report, sort_keys=False, indent=2, ensure_ascii=False) + "\n"
+        json.dumps(report, sort_keys=False, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
     )
     return out_path
 

@@ -21,16 +21,6 @@ from TraceLens.PerfModel.benchmarking.microbench_utils import (
     resolve_physical_device,
 )
 
-# These modules import torch; without it they stay None and the tests that use them skip in _require_torch.
-try:
-    from TraceLens.PerfModel.benchmarking import (
-        fp4fp6_helpers,
-        microbench,
-        microbench_rocprof,
-    )
-except ImportError:
-    fp4fp6_helpers = microbench = microbench_rocprof = None
-
 HAS_TORCH = importlib.util.find_spec("torch") is not None
 
 
@@ -47,16 +37,24 @@ def _require_cuda_gpu():
 
 def _import_microbench():
     _require_torch()
+    pytest.importorskip("triton")
+    from TraceLens.PerfModel.benchmarking import microbench
+
     return microbench
 
 
 def _import_microbench_rocprof():
     _require_torch()
+    pytest.importorskip("triton")
+    from TraceLens.PerfModel.benchmarking import microbench_rocprof
+
     return microbench_rocprof
 
 
 def _import_fp4fp6_helpers():
     _require_torch()
+    from TraceLens.PerfModel.benchmarking import fp4fp6_helpers
+
     return fp4fp6_helpers
 
 
@@ -120,7 +118,9 @@ class TestMicrobenchUtils:
 
         with patch(
             "TraceLens.PerfModel.benchmarking.microbench_utils.shutil.which",
-            return_value="/usr/bin/nvidia-smi",
+            side_effect=lambda tool: (
+                "/usr/bin/nvidia-smi" if tool == "nvidia-smi" else None
+            ),
         ), patch.dict("sys.modules", {"amdsmi": None}), patch(
             "TraceLens.PerfModel.benchmarking.microbench_utils.subprocess.run",
             side_effect=fake_run,
@@ -146,6 +146,8 @@ class TestMicrobenchHelpers:
             ("AMD Radeon 890M Graphics", 32.0, "Radeon_890M"),
             ("Generic GPU", 280.0, "MI355X"),
             ("Some Card", 64.0, "Card"),
+            ("BW1000_H", 192.0, "BW1000_H"),
+            ("Hygon HCU", 288.0, "Hygon HCU"),
             ("", 0.0, "GPU"),
         ],
     )

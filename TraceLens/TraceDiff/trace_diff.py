@@ -27,7 +27,7 @@ from ..util import normalize_name_for_comparison
 
 _TRACELENS_DEBUG = os.environ.get("TRACELENS_DEBUG", "0") == "1"
 _GRAPH_LAUNCH_NAMES = ["hipGraphLaunch", "cudaGraphLaunch"]
-_KERNEL_DISPATCH_CATEGORIES = ("cuda_runtime", "cuda_driver")
+_KERNEL_DISPATCH_CATEGORIES = TraceEventUtils.RuntimeCategories
 _DUR = TraceEventUtils.TraceKeys.Duration
 
 
@@ -1634,16 +1634,17 @@ class TraceDiff:
         self.cpu_op_map_trace1 = cpu_op_map_trace1
         self.cpu_op_map_trace2 = cpu_op_map_trace2
 
-    def generate_tracediff_report(self):
+    def generate_tracediff_report(self, *, collapse_identical=True):
         """
         Generate all TraceDiff output DataFrames and update the object variables.
         This does NOT write any files. Use print_tracediff_report_files to save outputs.
+        Set collapse_identical=False when a consumer needs both source columns.
         """
         self.generate_diff_stats()
         self.get_df_diff_stats_unique_args()
         self.get_cpu_op_to_kernels_json()
 
-        if self.identical_traces:
+        if self.identical_traces and collapse_identical:
             df = self.diff_stats_df
             df = df[~(df["source"] == "trace2")]
             df = df.drop(columns=["source"])
